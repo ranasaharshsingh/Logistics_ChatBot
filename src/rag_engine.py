@@ -29,32 +29,38 @@ def get_text_chunks(text):
     chunks = text_splitter.split_text(text)
     return chunks
 
+# ... (Functions 1, 2, 3 remain the same)
+
 # 4. Function to Create Vector DB (The Memory)
 def create_vector_store(text_chunks):
     embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
+    
+    # FAISS.from_texts creates a fresh database every time. 
+    # If you want to ADD to an existing one, you would use merge_from, 
+    # but for a fresh upload session, collecting all chunks here is correct.
     vector_store = FAISS.from_texts(text_chunks, embedding=embeddings)
-    vector_store.save_local("faiss_index") # Saves a folder locally
+    vector_store.save_local("faiss_index")
 
 # 5. Function to Process User Questions
 def process_query(user_question):
-    # Use the unified model name we updated earlier
     embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
     
-    # 1. Check if the index folder exists before trying to load it
     if not os.path.exists("faiss_index"):
-        return "⚠️ No documents found. Please upload and 'Process' your PDFs in the sidebar first!"
+        return "⚠️ No documents found. Please upload and 'Process' your PDFs first!"
 
     try:
-        # 2. Load the memory
         new_db = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True)
-        docs = new_db.similarity_search(user_question)
+        
+        # CRITICAL CHANGE: Increase 'k' so it finds chunks from DIFFERENT documents.
+        # If you have multiple docs, k=10 or k=15 is much safer than the default.
+        docs = new_db.similarity_search(user_question, k=10) 
+        
     except Exception as e:
         return f"System Error: Could not read the index. Error: {e}"
 
-    # ... (rest of your code for prompt_template and chain remains the same)
-    # Setup the AI instructions
     prompt_template = """
     You are an expert Logistics Manager. Answer the question based ONLY on the provided context.
+    The context below contains information from multiple logistics documents.
     
     Context:
     {context}
@@ -70,7 +76,7 @@ def process_query(user_question):
     chain = load_qa_chain(model, chain_type="stuff", prompt=prompt)
     
     response = chain(
-        {"input_documents":docs, "question": user_question},
+        {"input_documents": docs, "question": user_question},
         return_only_outputs=True
     )
     return response["output_text"]
